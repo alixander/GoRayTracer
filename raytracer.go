@@ -150,7 +150,9 @@ func withinRadius(sphere Sphere, x float64, y float64, z float64) bool {
                     math.Pow(float64(sphere.center.Y - y), 2) +
                     math.Pow(float64(sphere.center.Z - z), 2) 
 
-    if float64(distToCenter - math.Pow(float64(sphere.radius), 2)) <= 0 {
+    intersectionPoint := float64(distToCenter - math.Pow(float64(sphere.radius), 2))
+
+    if intersectionPoint <= 0 {
         return true
     }
     return false
@@ -162,12 +164,11 @@ func calculateDiffuseColor(normal Point) Point {
     if dotProduct < 0 {
         dotProduct = 0
     }
-    //fmt.Println(scale(tempDiffuse, dotProduct))
     return pointMult(scale(tempDiffuse, dotProduct), tempColor)
 }
 
 func calculateAmbientColor() Point {
-    tempAmbient := pointNormalize(Point{X: 200, Y: 100, Z: 70})
+    tempAmbient := pointNormalize(Point{X: 0, Y: 200, Z: 70})
     return pointMult(tempColor, tempAmbient) 
 }
 
@@ -193,6 +194,10 @@ func shootRay(ray func(t float64) Point) (float64, Point) {
     return -1, Point{}
 }
 
+//func (sphere Sphere) hit(ray func(t float64) Point) (float64, Point) {
+//    
+//}
+
 func renderScene() {
     doneChannel := make(chan bool)
     pixelChannel := make(chan Point)
@@ -202,6 +207,7 @@ func renderScene() {
         pixel := <- pixelChannel
         ray := computeRay(pixel)
         rayHit, color := shootRay(ray)
+        //rayHit, color := sphere.hit(ray)
         color = scale(color, 255)
         if rayHit != -1 {
             if color.X > 255{
