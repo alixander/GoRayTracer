@@ -32,7 +32,7 @@ func (a Point) equals(b Point) bool {
 
 type Ray struct {
     start Point
-    end Point
+    direction Point
 }
 
 type Sphere struct {
@@ -46,10 +46,12 @@ var (
     height int = 800
     viewport = image.Rect(0, 0, width, height)
     viewportColors = image.NewRGBA(viewport)
-    eye = Point{X:600, Y:400, Z:-50}
-    sphere = Sphere{Point{X: 400, Y:400, Z:100}, 150}
+    eye = Point{X:600, Y:400, Z:-150}
+    sphereA = Sphere{center: Point{X: 400, Y:400, Z:100}, radius: 150}
+    sphereB = Sphere{center: Point{X: 600, Y:400, Z:350}, radius: 100}
     tempColor = pointNormalize(Point{X: 50, Y: 150, Z: 200})
-    tempLight = pointNormalize(Point{X: -200, Y: -150, Z: 0})
+    tempLight = pointNormalize(Point{X: -200, Y: -150, Z: -100})
+    allSpheres = []Sphere {sphereA, sphereB}
 )
 
 
@@ -139,32 +141,19 @@ func pointNormalize(a Point) Point {
     }
 }
 
-func computeRay(pixel Point) func(t float64) Point {
-    return func(t float64) Point {
-        return pointAdd(eye, pointScale(pointSub(pixel, eye), t))
-    }
+func getRayPoint(t float64, ray Ray) Point {
+    return pointAdd(eye, pointScale(ray.direction, t))
 }
 
-func withinRadius(sphere Sphere, x float64, y float64, z float64) bool {
-    distToCenter := math.Pow(float64(sphere.center.X - x), 2) + 
-                    math.Pow(float64(sphere.center.Y - y), 2) +
-                    math.Pow(float64(sphere.center.Z - z), 2) 
-
-    intersectionPoint := float64(distToCenter - math.Pow(float64(sphere.radius), 2))
-
-    if intersectionPoint <= 0 {
-        return true
-    }
-    return false
+func computeRay(pixel Point) Ray {
+    //p(t) = e + t(s-e)
+    return Ray{start: eye, direction: pointSub(pixel, eye)}
 }
 
 func calculateDiffuseColor(normal Point) Point {
     tempDiffuse := pointNormalize(Point{X: 100, Y: 200, Z: 60})
-    dotProduct := getDotProduct(normal, tempLight)
-    if dotProduct < 0 {
-        dotProduct = 0
-    }
-    return pointMult(scale(tempDiffuse, dotProduct), tempColor)
+    theta := math.Max(0, getDotProduct(normal, tempLight))
+    return pointMult(scale(tempDiffuse, theta), tempColor)
 }
 
 func calculateAmbientColor() Point {
@@ -172,31 +161,49 @@ func calculateAmbientColor() Point {
     return pointMult(tempColor, tempAmbient) 
 }
 
-func hitObject(sphere Sphere, rayPoint Point) (bool, Point) {
-    if withinRadius(sphere, rayPoint.X, rayPoint.Y, rayPoint.Z) {
-        //Normal on a sphere (p-c)/R?
-        surfaceNormal := pointDiv(pointSub(rayPoint, sphere.center), sphere.radius)
-        diffuseColor := calculateDiffuseColor(surfaceNormal)
-        ambientColor := calculateAmbientColor()
-        finalColor := pointAdd(diffuseColor, ambientColor)
-        return true, finalColor
-    }
-    return false, Point{}
+func getReflectanceLight(light Point, normal Point) Point {
+    lightDotNormal := math.Max(0, getDotProduct(light, normal))
+    return pointSub(light, pointScale(normal, 2.0*lightDotNormal))
 }
 
-func shootRay(ray func(t float64) Point) (float64, Point) {
-    for t := 1; t < 100; t++ {
-        isHit, color := hitObject(sphere, ray(float64(t)))
-        if isHit {
-            return float64(t), color
-        }
-    }
-    return -1, Point{}
+func calculateSpecularColor(normal Point) Point {
+    tempSpecular := pointNormalize(Point{X: 100, Y: 80, Z: 180})
+    tempShininess := 2.0 
+    reflectanceLight := getReflectanceLight(tempLight, normal)
+    specularTerm := math.Max(0, getDotProduct(reflectanceLight, eye))
+    return pointMult(tempSpecular, pointScale(tempColor, math.Pow(specularTerm, tempShininess)))
 }
 
-//func (sphere Sphere) hit(ray func(t float64) Point) (float64, Point) {
-//    
-//}
+// Formula from http://www.csee.umbc.edu/~olano/435f02/ray-sphere.html
+func (sphere Sphere) hit(ray Ray) (float64, Point) {
+    a := getDotProduct(ray.direction, ray.direction) 
+    b := 2.0 * getDotProduct(ray.direction, pointSub(eye, sphere.center)) 
+    c := getDotProduct(pointSub(eye, sphere.center), pointSub(eye, sphere.center)) - math.Pow(sphere.radius, 2)
+    discriminant := math.Pow(b, 2) - 4.0*a*c
+
+    if discriminant < 0 {
+        return -1, Point{}
+    }
+    tNeg := (-b - math.Sqrt(discriminant))/(2*a)
+    tPos := (-b + math.Sqrt(discriminant))/(2*a)
+    var t float64
+    if tNeg > 0 {
+        t = tNeg
+    } else if tPos > 0 {
+        t = tPos
+    }
+
+    rayPoint := getRayPoint(t, ray)
+    surfaceNormal := pointDiv(pointSub(rayPoint, sphere.center), sphere.radius)
+
+    diffuseColor := calculateDiffuseColor(surfaceNormal)
+    ambientColor := calculateAmbientColor()
+    specularColor := calculateSpecularColor(surfaceNormal)
+
+    fmt.Println(specularColor)
+    finalColor := pointAdd(pointAdd(diffuseColor, ambientColor), specularColor)
+    return t, finalColor
+}
 
 func renderScene() {
     doneChannel := make(chan bool)
@@ -205,23 +212,23 @@ func renderScene() {
 
     for done := <- doneChannel; done == false; done = <- doneChannel{
         pixel := <- pixelChannel
+        drawPixel(viewportColors, pixel.X, pixel.Y, 0, 100, 180) //This is probably extra work
         ray := computeRay(pixel)
-        rayHit, color := shootRay(ray)
-        //rayHit, color := sphere.hit(ray)
-        color = scale(color, 255)
-        if rayHit != -1 {
-            if color.X > 255{
-                color.X = 255
+        for _, singleSphere := range allSpheres {
+            rayHit, color := singleSphere.hit(ray)
+            color = scale(color, 255)
+            if rayHit != -1 {
+                if color.X > 255{
+                    color.X = 255
+                }
+                if color.Y > 255{
+                    color.Y = 255
+                }
+                if color.Z > 255{
+                    color.Z = 255
+                }
+                drawPixel(viewportColors, pixel.X, pixel.Y, uint8(color.X), uint8(color.Y), uint8(color.Z))
             }
-            if color.Y > 255{
-                color.Y = 255
-            }
-            if color.Z > 255{
-                color.Z = 255
-            }
-            drawPixel(viewportColors, pixel.X, pixel.Y, uint8(color.X), uint8(color.Y), uint8(color.Z))
-        } else {
-            drawPixel(viewportColors, pixel.X, pixel.Y, 0, 100, 180)
         }
     }
 }
