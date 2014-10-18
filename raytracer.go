@@ -46,9 +46,9 @@ var (
     height int = 800
     viewport = image.Rect(0, 0, width, height)
     viewportColors = image.NewRGBA(viewport)
-    eye = Point{X:600, Y:400, Z:-150}
-    sphereA = Sphere{center: Point{X: 400, Y:400, Z:100}, radius: 150}
-    sphereB = Sphere{center: Point{X: 600, Y:400, Z:350}, radius: 100}
+    eye = Point{X:400, Y:400, Z:-150}
+    sphereA = Sphere{center: Point{X: 400, Y:400, Z:100}, radius: 100}
+    sphereB = Sphere{center: Point{X: 600, Y:400, Z:100}, radius: 100}
     tempColor = pointNormalize(Point{X: 50, Y: 150, Z: 200})
     tempLight = pointNormalize(Point{X: -200, Y: -150, Z: -100})
     allSpheres = []Sphere {sphereA, sphereB}
@@ -200,7 +200,7 @@ func (sphere Sphere) hit(ray Ray) (float64, Point) {
     ambientColor := calculateAmbientColor()
     specularColor := calculateSpecularColor(surfaceNormal)
 
-    fmt.Println(specularColor)
+    //fmt.Println(specularColor)
     finalColor := pointAdd(pointAdd(diffuseColor, ambientColor), specularColor)
     return t, finalColor
 }
@@ -214,10 +214,15 @@ func renderScene() {
         pixel := <- pixelChannel
         drawPixel(viewportColors, pixel.X, pixel.Y, 0, 100, 180) //This is probably extra work
         ray := computeRay(pixel)
+        var color Point;
+        var isHit bool = false;
+        minT := math.MaxFloat64;
         for _, singleSphere := range allSpheres {
-            rayHit, color := singleSphere.hit(ray)
-            color = scale(color, 255)
-            if rayHit != -1 {
+            rayHit, rayColor := singleSphere.hit(ray)
+            if (rayHit != -1 && rayHit < minT) {
+                isHit = true;
+                minT = rayHit;
+                color = scale(rayColor, 255)
                 if color.X > 255{
                     color.X = 255
                 }
@@ -227,8 +232,10 @@ func renderScene() {
                 if color.Z > 255{
                     color.Z = 255
                 }
-                drawPixel(viewportColors, pixel.X, pixel.Y, uint8(color.X), uint8(color.Y), uint8(color.Z))
             }
+        }
+        if (isHit) {
+            drawPixel(viewportColors, pixel.X, pixel.Y, uint8(color.X), uint8(color.Y), uint8(color.Z))
         }
     }
 }
