@@ -46,12 +46,15 @@ var (
     height int = 800
     viewport = image.Rect(0, 0, width, height)
     viewportColors = image.NewRGBA(viewport)
-    eye = Point{X:400, Y:400, Z:-150}
+    eye = Point{X:400, Y:400, Z:-550}
     sphereA = Sphere{center: Point{X: 400, Y:400, Z:100}, radius: 100}
     sphereB = Sphere{center: Point{X: 600, Y:400, Z:100}, radius: 100}
+    sphereC = Sphere{center: Point{X: 200, Y:400, Z:100}, radius: 100}
+    sphereD = Sphere{center: Point{X: 400, Y:200, Z:100}, radius: 100}
+    sphereE = Sphere{center: Point{X: 400, Y:600, Z:100}, radius: 100}
     tempColor = pointNormalize(Point{X: 50, Y: 150, Z: 200})
-    tempLight = pointNormalize(Point{X: -200, Y: -150, Z: -100})
-    allSpheres = []Sphere {sphereA, sphereB}
+    tempLight = pointNormalize(Point{X: 0, Y: -150, Z: -100})
+    allSpheres = []Sphere {sphereA, sphereB, sphereC, sphereD, sphereE}
 )
 
 
@@ -60,7 +63,7 @@ func drawPixel(canvas *image.RGBA, x float64, y float64, r uint8, g uint8, b uin
         R: r,
         G: g,
         B: b,
-        A: 0xff,
+        A: 255,
     })
 }
 
@@ -135,9 +138,9 @@ func getDotProduct(a Point, b Point) float64 {
 func pointNormalize(a Point) Point {
     magnitude := math.Sqrt(float64(a.X*a.X + a.Y*a.Y + a.Z*a.Z))
     return Point{
-        X: float64(float64(a.X)/magnitude),
-        Y: float64(float64(a.Y)/magnitude),
-        Z: float64(float64(a.Z)/magnitude),
+        X: float64(a.X)/magnitude,
+        Y: float64(a.Y)/magnitude,
+        Z: float64(a.Z)/magnitude,
     }
 }
 
@@ -145,8 +148,8 @@ func getRayPoint(t float64, ray Ray) Point {
     return pointAdd(eye, pointScale(ray.direction, t))
 }
 
+//p(t) = e + t(s-e)
 func computeRay(pixel Point) Ray {
-    //p(t) = e + t(s-e)
     return Ray{start: eye, direction: pointSub(pixel, eye)}
 }
 
@@ -162,13 +165,13 @@ func calculateAmbientColor() Point {
 }
 
 func getReflectanceLight(light Point, normal Point) Point {
-    lightDotNormal := math.Max(0, getDotProduct(light, normal))
+    lightDotNormal := math.Max(0.0, getDotProduct(light, normal))
     return pointSub(light, pointScale(normal, 2.0*lightDotNormal))
 }
 
 func calculateSpecularColor(normal Point) Point {
-    tempSpecular := pointNormalize(Point{X: 100, Y: 80, Z: 180})
-    tempShininess := 2.0 
+    tempSpecular := pointNormalize(Point{X: 70, Y: 180, Z: 80})
+    tempShininess := 16.0 
     reflectanceLight := getReflectanceLight(tempLight, normal)
     specularTerm := math.Max(0, getDotProduct(reflectanceLight, eye))
     return pointMult(tempSpecular, pointScale(tempColor, math.Pow(specularTerm, tempShininess)))
@@ -184,14 +187,11 @@ func (sphere Sphere) hit(ray Ray) (float64, Point) {
     if discriminant < 0 {
         return -1, Point{}
     }
+
     tNeg := (-b - math.Sqrt(discriminant))/(2*a)
     tPos := (-b + math.Sqrt(discriminant))/(2*a)
     var t float64
-    if tNeg > 0 {
-        t = tNeg
-    } else if tPos > 0 {
-        t = tPos
-    }
+    t = math.Min(tNeg, tPos)
 
     rayPoint := getRayPoint(t, ray)
     surfaceNormal := pointDiv(pointSub(rayPoint, sphere.center), sphere.radius)
@@ -200,8 +200,8 @@ func (sphere Sphere) hit(ray Ray) (float64, Point) {
     ambientColor := calculateAmbientColor()
     specularColor := calculateSpecularColor(surfaceNormal)
 
-    //fmt.Println(specularColor)
-    finalColor := pointAdd(pointAdd(diffuseColor, ambientColor), specularColor)
+    finalColor := pointAdd(pointAdd(ambientColor, diffuseColor), specularColor)
+
     return t, finalColor
 }
 
@@ -215,7 +215,7 @@ func renderScene() {
         drawPixel(viewportColors, pixel.X, pixel.Y, 0, 100, 180) //This is probably extra work
         ray := computeRay(pixel)
         var color Point;
-        var isHit bool = false;
+        isHit := false;
         minT := math.MaxFloat64;
         for _, singleSphere := range allSpheres {
             rayHit, rayColor := singleSphere.hit(ray)
