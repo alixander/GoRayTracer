@@ -58,11 +58,11 @@ var (
 )
 
 
-func drawPixel(canvas *image.RGBA, x float64, y float64, r uint8, g uint8, b uint8) {
+func drawPixel(canvas *image.RGBA, x float64, y float64, r float64, g float64, b float64) {
     canvas.SetRGBA(int(x), int(y), color.RGBA {
-        R: r,
-        G: g,
-        B: b,
+        R: floatToRGB(r),
+        G: floatToRGB(g),
+        B: floatToRGB(b),
         A: 255,
     })
 }
@@ -81,6 +81,10 @@ func getPixelsRoutine(pixelChannel chan Point, doneChannel chan bool) {
         }
     }
     doneChannel <- true
+}
+
+func floatToRGB(color float64) uint8 {
+    return uint8(math.Floor(color));
 }
 
 func pointScale(a Point, b float64) Point {
@@ -170,7 +174,7 @@ func getReflectanceLight(light Point, normal Point) Point {
 }
 
 func calculateSpecularColor(normal Point) Point {
-    tempSpecular := pointNormalize(Point{X: 70, Y: 180, Z: 80})
+    tempSpecular := pointNormalize(Point{X: 70, Y: 80, Z: 80})
     tempShininess := 16.0 
     reflectanceLight := getReflectanceLight(tempLight, normal)
     specularTerm := math.Max(0, getDotProduct(reflectanceLight, eye))
@@ -235,7 +239,7 @@ func renderScene() {
             }
         }
         if (isHit) {
-            drawPixel(viewportColors, pixel.X, pixel.Y, uint8(color.X), uint8(color.Y), uint8(color.Z))
+            drawPixel(viewportColors, pixel.X, pixel.Y, color.X, color.Y, color.Z)
         }
     }
 }
