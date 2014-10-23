@@ -47,14 +47,14 @@ var (
     viewport = image.Rect(0, 0, width, height)
     viewportColors = image.NewRGBA(viewport)
     eye = Point{X:400, Y:400, Z:-550}
-    sphereA = Sphere{center: Point{X: 400, Y:400, Z:100}, radius: 100}
-    sphereB = Sphere{center: Point{X: 600, Y:400, Z:100}, radius: 100}
-    sphereC = Sphere{center: Point{X: 200, Y:400, Z:100}, radius: 100}
-    sphereD = Sphere{center: Point{X: 400, Y:200, Z:100}, radius: 100}
-    sphereE = Sphere{center: Point{X: 400, Y:600, Z:100}, radius: 100}
-    tempColor = pointNormalize(Point{X: 50, Y: 150, Z: 200})
-    tempLight = pointNormalize(Point{X: 0, Y: -150, Z: -100})
-    allSpheres = []Sphere {sphereA, sphereB, sphereC, sphereD, sphereE}
+    sphereA = Sphere{center: Point{X: 400, Y:400, Z:50}, radius: 300}
+    //sphereB = Sphere{center: Point{X: 600, Y:400, Z:100}, radius: 100}
+    //sphereC = Sphere{center: Point{X: 200, Y:400, Z:100}, radius: 100}
+    //sphereD = Sphere{center: Point{X: 400, Y:200, Z:100}, radius: 100}
+    //sphereE = Sphere{center: Point{X: 400, Y:600, Z:100}, radius: 100}
+    tempColor = Point{X: 0.6, Y: 0.6, Z: 0.6}
+    tempLight = pointNormalize(Point{X: 600, Y: -300, Z: -400})
+    allSpheres = []Sphere {sphereA}
 )
 
 
@@ -84,7 +84,7 @@ func getPixelsRoutine(pixelChannel chan Point, doneChannel chan bool) {
 }
 
 func floatToRGB(color float64) uint8 {
-    return uint8(math.Floor(color));
+    return uint8(math.Floor(color*256))
 }
 
 func pointScale(a Point, b float64) Point {
@@ -158,26 +158,29 @@ func computeRay(pixel Point) Ray {
 }
 
 func calculateDiffuseColor(normal Point) Point {
-    tempDiffuse := pointNormalize(Point{X: 100, Y: 200, Z: 60})
+    tempDiffuse := Point{X: 1, Y: 1, Z: 0}
     theta := math.Max(0, getDotProduct(normal, tempLight))
     return pointMult(scale(tempDiffuse, theta), tempColor)
 }
 
 func calculateAmbientColor() Point {
-    tempAmbient := pointNormalize(Point{X: 0, Y: 200, Z: 70})
+    tempAmbient := Point{X: 0.1, Y: 0.1, Z: 0}
     return pointMult(tempColor, tempAmbient) 
 }
 
+// R = I - 2N(I . N)
 func getReflectanceLight(light Point, normal Point) Point {
     lightDotNormal := math.Max(0.0, getDotProduct(light, normal))
     return pointSub(light, pointScale(normal, 2.0*lightDotNormal))
 }
 
 func calculateSpecularColor(normal Point) Point {
-    tempSpecular := pointNormalize(Point{X: 70, Y: 80, Z: 80})
-    tempShininess := 16.0 
+    tempSpecular := Point{X: 0.8, Y: 0.8, Z: 0.8}
+    tempShininess := 4.0 
     reflectanceLight := getReflectanceLight(tempLight, normal)
-    specularTerm := math.Max(0, getDotProduct(reflectanceLight, eye))
+    //fmt.Println(reflectanceLight)
+    specularTerm := math.Max(0, getDotProduct(reflectanceLight, pointNormalize(eye)))
+    //fmt.Println(specularTerm)
     return pointMult(tempSpecular, pointScale(tempColor, math.Pow(specularTerm, tempShininess)))
 }
 
@@ -204,6 +207,10 @@ func (sphere Sphere) hit(ray Ray) (float64, Point) {
     ambientColor := calculateAmbientColor()
     specularColor := calculateSpecularColor(surfaceNormal)
 
+    //fmt.Println(specularColor)
+
+    //finalColor := diffuseColor
+    //finalColor := pointAdd(ambientColor, diffuseColor)
     finalColor := pointAdd(pointAdd(ambientColor, diffuseColor), specularColor)
 
     return t, finalColor
@@ -216,25 +223,26 @@ func renderScene() {
 
     for done := <- doneChannel; done == false; done = <- doneChannel{
         pixel := <- pixelChannel
-        drawPixel(viewportColors, pixel.X, pixel.Y, 0, 100, 180) //This is probably extra work
+        drawPixel(viewportColors, pixel.X, pixel.Y, 0, 0, 0) //This is probably extra work
         ray := computeRay(pixel)
-        var color Point;
-        isHit := false;
-        minT := math.MaxFloat64;
+        var color Point
+        isHit := false
+        minT := math.MaxFloat64
         for _, singleSphere := range allSpheres {
             rayHit, rayColor := singleSphere.hit(ray)
             if (rayHit != -1 && rayHit < minT) {
-                isHit = true;
-                minT = rayHit;
-                color = scale(rayColor, 255)
-                if color.X > 255{
-                    color.X = 255
+                color = rayColor
+                isHit = true
+                minT = rayHit
+                //refactor this into clipping method later
+                if color.X > 1.0 {
+                    color.X = 1.0
                 }
-                if color.Y > 255{
-                    color.Y = 255
+                if color.Y > 1.0 {
+                    color.Y = 1.0
                 }
-                if color.Z > 255{
-                    color.Z = 255
+                if color.Z > 1.0 {
+                    color.Z = 1.0
                 }
             }
         }
