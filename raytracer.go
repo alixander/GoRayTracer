@@ -2,8 +2,8 @@ package main
 
 import (
     "fmt"
-    //"./vector"
     "math"
+    "./vector"
     "os"
     "image"
     "image/color"
@@ -11,32 +11,20 @@ import (
     "time"
 )
 
-type Point struct {
-    X float64
-    Y float64
-    Z float64
-}
-
 type Color struct {
     R float64
     G float64
     B float64
 }
 
-func (a Point) equals(b Point) bool {
-    if a.X == b.X && a.Y == b.Y && a.Z == b.Z {
-        return true
-    }
-    return false
-}
 
 type Ray struct {
-    start Point
-    direction Point
+    start raytracer.Vector
+    direction raytracer.Vector
 }
 
 type Sphere struct {
-    center Point
+    center raytracer.Vector
     radius float64
 }
 
@@ -46,15 +34,19 @@ var (
     height int = 800
     viewport = image.Rect(0, 0, width, height)
     viewportColors = image.NewRGBA(viewport)
-    eye = Point{X:400, Y:400, Z:-550}
-    sphereA = Sphere{center: Point{X: 400, Y:400, Z:50}, radius: 300}
-    //sphereB = Sphere{center: Point{X: 600, Y:400, Z:100}, radius: 100}
-    //sphereC = Sphere{center: Point{X: 200, Y:400, Z:100}, radius: 100}
-    //sphereD = Sphere{center: Point{X: 400, Y:200, Z:100}, radius: 100}
-    //sphereE = Sphere{center: Point{X: 400, Y:600, Z:100}, radius: 100}
-    tempColor = Point{X: 0.6, Y: 0.6, Z: 0.6}
-    tempLight = pointNormalize(Point{X: 600, Y: -300, Z: -400})
+    eye = raytracer.Vector{X:400, Y:400, Z:700}
+    sphereA = Sphere{center: raytracer.Vector{X: 400, Y:400, Z:-200}, radius: 320}
+    //sphereA = Sphere{center: raytracer.Vector{X: 400, Y:400, Z:-200}, radius: 120}
+    //sphereB = Sphere{center: raytracer.Vector{X: 650, Y:400, Z:-200}, radius: 120}
+    //sphereC = Sphere{center: raytracer.Vector{X: 150, Y:400, Z:-200}, radius: 120}
+    //sphereD = Sphere{center: raytracer.Vector{X: 400, Y:150, Z:-200}, radius: 120}
+    //sphereE = Sphere{center: raytracer.Vector{X: 400, Y:650, Z:-200}, radius: 120}
+    tempColor = raytracer.Vector{X: 0.6, Y: 0.6, Z: 0.6}
+    lightA = (raytracer.Vector{X: 300, Y: -400, Z: 350}).Normalize()
+    lightB = (raytracer.Vector{X: -300, Y: 400, Z: 350}).Normalize()
+    //allSpheres = []Sphere {sphereA, sphereB, sphereC, sphereD, sphereE}
     allSpheres = []Sphere {sphereA}
+    pointLights = []raytracer.Vector {lightA}
 )
 
 
@@ -73,126 +65,100 @@ func saveScene(canvas *image.RGBA) {
     png.Encode(outputImage, canvas)
 }
 
-func getPixelsRoutine(pixelChannel chan Point, doneChannel chan bool) {
+func getPixelsRoutine(pixelChannel chan raytracer.Vector, doneChannel chan bool) {
     for y := 0; y < height; y++ {
         for x := 0; x < width; x++ {
             doneChannel <- false
-            pixelChannel <- Point{X:float64(x), Y:float64(y), Z:0}
+            pixelChannel <- raytracer.Vector{X:float64(x), Y:float64(y), Z:0}
         }
     }
     doneChannel <- true
 }
 
 func floatToRGB(color float64) uint8 {
-    return uint8(math.Floor(color*256))
+    return uint8(math.Floor(color*255))
 }
 
-func pointScale(a Point, b float64) Point {
-    return Point{
-        X: a.X * b,
-        Y: a.Y * b,
-        Z: a.Z * b,
-    }
-}
 
-func pointSub(a Point, b Point) Point {
-    return Point{
-        X: a.X - b.X,
-        Y: a.Y - b.Y,
-        Z: a.Z - b.Z,
-    }
-}
-
-func pointAdd(a Point, b Point) Point {
-    return Point{
-        X: a.X + b.X,
-        Y: a.Y + b.Y,
-        Z: a.Z + b.Z,
-    }
-}
-
-func pointMult(a Point, b Point) Point {
-    return Point{
-        X: a.X * b.X,
-        Y: a.Y * b.Y,
-        Z: a.Z * b.Z,
-    }
-}
-
-func pointDiv(a Point, b float64) Point {
-    return Point{
-        X: a.X/b,
-        Y: a.Y/b,
-        Z: a.Z/b,
-    }
-}
-
-func scale(a Point, b float64) Point {
-    return Point{
-        X: a.X * b,
-        Y: a.Y * b,
-        Z: a.Z * b,
-    }
-}
-
-func getDotProduct(a Point, b Point) float64 {
-   return a.X*b.X + a.Y*b.Y + a.Z*b.Z
-}
-
-func pointNormalize(a Point) Point {
-    magnitude := math.Sqrt(float64(a.X*a.X + a.Y*a.Y + a.Z*a.Z))
-    return Point{
-        X: float64(a.X)/magnitude,
-        Y: float64(a.Y)/magnitude,
-        Z: float64(a.Z)/magnitude,
-    }
-}
-
-func getRayPoint(t float64, ray Ray) Point {
-    return pointAdd(eye, pointScale(ray.direction, t))
+func getRayIntersection(t float64, ray Ray) raytracer.Vector {
+    return eye.VectorAdd(ray.direction.VectorScale(t))
 }
 
 //p(t) = e + t(s-e)
-func computeRay(pixel Point) Ray {
-    return Ray{start: eye, direction: pointSub(pixel, eye)}
+func computeRay(pixel raytracer.Vector) Ray {
+    return Ray{start: eye, direction: pixel.VectorSub(eye)}
 }
 
-func calculateDiffuseColor(normal Point) Point {
-    tempDiffuse := Point{X: 1, Y: 1, Z: 0}
-    theta := math.Max(0, getDotProduct(normal, tempLight))
-    return pointMult(scale(tempDiffuse, theta), tempColor)
+func emptyVector() raytracer.Vector {
+    return raytracer.Vector{X:0, Y:0, Z:0}
 }
 
-func calculateAmbientColor() Point {
-    tempAmbient := Point{X: 0.1, Y: 0.1, Z: 0}
-    return pointMult(tempColor, tempAmbient) 
+func calculateDiffuseColor(normal raytracer.Vector) raytracer.Vector {
+    tempDiffuse := raytracer.Vector{X: 1, Y: 1, Z: 0}
+    diffuseColor := emptyVector()
+
+    var theta float64
+    var color raytracer.Vector
+
+    for _, light := range pointLights {
+        theta = math.Max(0, normal.DotProduct(light))
+        color = tempDiffuse.VectorScale(theta).VectorMult(tempColor)
+        diffuseColor = diffuseColor.VectorAdd(color)
+    }
+    return diffuseColor
 }
+
+func calculateAmbientColor() raytracer.Vector {
+    tempAmbient := raytracer.Vector{X: 0.1, Y: 0.1, Z: 0}
+    return tempColor.VectorMult(tempAmbient) 
+}
+
+
+//func changeZDirection(light raytracer.Vector) raytracer.Vector {
+//    return raytracer.Vector{
+//        X: light.X,
+//        Y: light.Y,
+//        Z: -light.Z,
+//    }
+//}
 
 // R = I - 2N(I . N)
-func getReflectanceLight(light Point, normal Point) Point {
-    lightDotNormal := math.Max(0.0, getDotProduct(light, normal))
-    return pointSub(light, pointScale(normal, 2.0*lightDotNormal))
+func getReflectanceLight(light raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
+    lightDotNormal := math.Max(0.0, light.DotProduct(normal))
+    return normal.VectorScale(2.0*lightDotNormal).VectorSub(light)
 }
 
-func calculateSpecularColor(normal Point) Point {
-    tempSpecular := Point{X: 0.8, Y: 0.8, Z: 0.8}
-    tempShininess := 4.0 
-    reflectanceLight := getReflectanceLight(tempLight, normal)
-    //fmt.Println(reflectanceLight)
-    specularTerm := math.Max(0, getDotProduct(reflectanceLight, pointNormalize(eye)))
-    //fmt.Println(specularTerm)
-    return pointMult(tempSpecular, pointScale(tempColor, math.Pow(specularTerm, tempShininess)))
+func calculateSpecularColor(intersection raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
+    tempSpecular := raytracer.Vector{X: 0.8, Y: 0.8, Z: 0.8}
+    tempShininess := 16.0 
+    specularColor := emptyVector()
+
+    var reflectanceLight raytracer.Vector
+    var incomingLight raytracer.Vector
+    var color raytracer.Vector
+    var directionToViewer raytracer.Vector
+    var specularTerm float64
+
+    for _, light := range pointLights {
+        incomingLight = light
+        reflectanceLight = getReflectanceLight(incomingLight, normal).Normalize()
+        directionToViewer = eye.VectorSub(intersection)
+        specularTerm = math.Max(0, reflectanceLight.DotProduct(directionToViewer.Normalize()))
+        color = tempSpecular.VectorMult(tempColor.VectorScale(math.Pow(specularTerm, tempShininess)))
+        specularColor = specularColor.VectorAdd(color)
+    }
+    return specularColor
 }
 
 // Formula from http://www.csee.umbc.edu/~olano/435f02/ray-sphere.html
-func (sphere Sphere) hit(ray Ray) (float64, Point) {
-    a := getDotProduct(ray.direction, ray.direction) 
-    b := 2.0 * getDotProduct(ray.direction, pointSub(eye, sphere.center)) 
-    c := getDotProduct(pointSub(eye, sphere.center), pointSub(eye, sphere.center)) - math.Pow(sphere.radius, 2)
+func (sphere Sphere) hit(ray Ray) (float64, raytracer.Vector) {
+    a := ray.direction.DotProduct(ray.direction) 
+    b := 2.0 * ray.direction.DotProduct(eye.VectorSub(sphere.center)) 
+    c := eye.VectorSub(sphere.center).DotProduct(eye.VectorSub(sphere.center)) - math.Pow(sphere.radius, 2)
     discriminant := math.Pow(b, 2) - 4.0*a*c
 
     if discriminant < 0 {
-        return -1, Point{}
+        return -1, raytracer.Vector{}
     }
 
     tNeg := (-b - math.Sqrt(discriminant))/(2*a)
@@ -200,32 +166,34 @@ func (sphere Sphere) hit(ray Ray) (float64, Point) {
     var t float64
     t = math.Min(tNeg, tPos)
 
-    rayPoint := getRayPoint(t, ray)
-    surfaceNormal := pointDiv(pointSub(rayPoint, sphere.center), sphere.radius)
+    intersection := getRayIntersection(t, ray)
+    surfaceNormal := intersection.VectorSub(sphere.center).VectorDiv(sphere.radius)
 
-    diffuseColor := calculateDiffuseColor(surfaceNormal)
+    // Maybe an un-normalized tempLight. Does it make a difference?
+    // AKA, is (vector1 - vector2) == (normalized(vector1) - normalized(vector2))?
+    // incomingLight := vectorSub(intersection, tempLight)
+
     ambientColor := calculateAmbientColor()
-    specularColor := calculateSpecularColor(surfaceNormal)
+    diffuseColor := calculateDiffuseColor(surfaceNormal)
+    specularColor := calculateSpecularColor(intersection, surfaceNormal)
 
-    //fmt.Println(specularColor)
-
-    //finalColor := diffuseColor
-    //finalColor := pointAdd(ambientColor, diffuseColor)
-    finalColor := pointAdd(pointAdd(ambientColor, diffuseColor), specularColor)
+    //finalColor := specularColor
+    //finalColor := vectorAdd(specularColor, diffuseColor)
+    finalColor := ambientColor.VectorAdd(diffuseColor.VectorAdd(specularColor))
 
     return t, finalColor
 }
 
 func renderScene() {
     doneChannel := make(chan bool)
-    pixelChannel := make(chan Point)
+    pixelChannel := make(chan raytracer.Vector)
     go getPixelsRoutine(pixelChannel, doneChannel)
 
     for done := <- doneChannel; done == false; done = <- doneChannel{
         pixel := <- pixelChannel
         drawPixel(viewportColors, pixel.X, pixel.Y, 0, 0, 0) //This is probably extra work
         ray := computeRay(pixel)
-        var color Point
+        var color raytracer.Vector
         isHit := false
         minT := math.MaxFloat64
         for _, singleSphere := range allSpheres {
@@ -243,6 +211,15 @@ func renderScene() {
                 }
                 if color.Z > 1.0 {
                     color.Z = 1.0
+                }
+                if color.X < 0 {
+                    color.X = 0
+                }
+                if color.Y < 0 {
+                    color.Y = 0
+                }
+                if color.Z < 0 {
+                    color.Z = 0
                 }
             }
         }
