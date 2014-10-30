@@ -57,6 +57,14 @@ func (a Vector) VectorDiv(b float64) Vector {
     }
 }
 
+func (a Vector) VectorIncrement(b float64) Vector {
+    return Vector{
+        X: a.X+b,
+        Y: a.Y+b,
+        Z: a.Z+b,
+    }
+}
+
 func (a Vector) Normalize() Vector {
     magnitude := math.Sqrt(float64(a.X*a.X + a.Y*a.Y + a.Z*a.Z))
     return Vector{
@@ -68,4 +76,8 @@ func (a Vector) Normalize() Vector {
 
 func (a Vector) DotProduct(b Vector) float64 {
     return a.X*b.X + a.Y*b.Y + a.Z*b.Z
+}
+
+func (a Vector) DistanceTo(b Vector) float64 {
+    return math.Sqrt(math.Pow(a.X-b.X, 2) + math.Pow(a.Y-b.Y, 2) + math.Pow(a.Z-b.Z, 2))
 }
