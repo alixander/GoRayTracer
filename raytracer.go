@@ -5,6 +5,7 @@ import (
     "bufio"
     "fmt"
     "math"
+    "math/rand"
     "reflect"
     "strings"
     "strconv"
@@ -26,10 +27,10 @@ type Material struct {
 
 // T for Transform
 type TMatrix struct {
-    row0 []float64
-    row1 []float64
-    row2 []float64
-    row3 []float64
+    row0 [4]float64
+    row1 [4]float64
+    row2 [4]float64
+    row3 [4]float64
 }
 
 type Ray struct {
@@ -48,6 +49,7 @@ type Triangle struct {
 }
 
 type Sphere struct {
+    id float64
     center raytracer.Vector
     radius float64
 }
@@ -75,8 +77,7 @@ var (
     spheres = map[Sphere]Material{}
     triangles = map[Triangle]Material{}
     shapes = map[Shape]Material{}
-
-    transformations = [][]int{}
+    shapeTransformations = map[Shape]TMatrix{}
 )
 
 func drawPixel(canvas *image.RGBA, x float64, y float64, r float64, g float64, b float64) {
@@ -134,6 +135,16 @@ func computeRay(start raytracer.Vector, pixel raytracer.Vector) Ray {
 
 func emptyVector() raytracer.Vector {
     return raytracer.Vector{X:0, Y:0, Z:0}
+}
+
+func emptyMatrix() TMatrix {
+    row0 := [4]float64{0, 0, 0, 0}
+    row1 := [4]float64{0, 0, 0, 0}
+    row2 := [4]float64{0, 0, 0, 0}
+    row3 := [4]float64{0, 0, 0, 0}
+
+    matrix := TMatrix{row0:row0, row1:row1, row2:row2, row3:row3}
+    return matrix
 }
 
 func calculateDiffuseColor(diffuse raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
@@ -212,6 +223,9 @@ func calculateColor(shape Shape, material Material, intersection raytracer.Vecto
     specularColor := calculateSpecularColor(material.specular, material.shininess, intersection, normal, ray, isReflection)
 
     shadedColor := ambientColor.VectorAdd(diffuseColor.VectorAdd(specularColor))
+    //if isReflection {
+    //    shadedColor = specularColor
+    //}
 
     isShadowed := false
     for light, _ := range directionalLights {
@@ -275,10 +289,10 @@ func calculateReflectedColor(shape Shape, incomingRay Ray, intersection raytrace
     //reflectedLight := getReflectedLight(incomingRay.direction.VectorScale(-1), normal)
     reflectedLight := reflectionLight(incomingRay.direction, normal)
     //reflectedLight := reflectionLight(incomingLight, normal).Normalize()
-    outgoingLight := reflectedLight.VectorSub(intersection)
+    //outgoingLight := reflectedLight.VectorSub(intersection)
     //reflectedRay := computeRay(intersection, intersection.VectorSub(reflectedLight))
-    //reflectedRay := computeRay(intersection, reflectedLight.VectorScale(-1))
-    reflectedRay := computeRay(intersection, outgoingLight)
+    reflectedRay := computeRay(intersection, reflectedLight)
+    //reflectedRay := computeRay(intersection, outgoingLight)
     for otherShape, _ := range shapes {
         if (!reflect.DeepEqual(otherShape, shape)) {
             hitValue, color := otherShape.hit(reflectedRay, false, depth)
@@ -292,6 +306,16 @@ func calculateReflectedColor(shape Shape, incomingRay Ray, intersection raytrace
     }
     return reflectedColor
 }
+
+//func traceBack(shape Shape, intersection raytracer.Vector, normal raytracer.Vector, depth int) raytracer.Vector {
+//    for light, _ := range pointLights {
+//        incomingLight := light
+//        reflected := reflectionLight(incomingLight, normal)
+//        outgoingLight := reflected.VectorSub(intersection)
+//        reflectedRay := computeRay(incomingLight, intersection)
+//
+//    }
+//}
 
 func isInsideTriangle(triangle Triangle, intersection raytracer.Vector, normal raytracer.Vector) bool {
     edge0 := triangle.b.VectorSub(triangle.a)
@@ -342,12 +366,58 @@ func (triangle Triangle) hit (ray Ray, isShadowRay bool, reflectionDepth int) (f
     return t, color
 }
 
+func transformNormal(matrix TMatrix, normal raytracer.Vector) raytracer.Vector {
+    row0 := []float64{matrix.row1[1]*matrix.row2[2] - matrix.row1[2]*matrix.row2[1],
+                      matrix.row1[2]*matrix.row2[0] - matrix.row1[0]*matrix.row2[2],
+                      matrix.row1[0]*matrix.row2[1] - matrix.row1[1]*matrix.row2[0]}
+
+    row1 := []float64{matrix.row0[2]*matrix.row2[1] - matrix.row0[1]*matrix.row2[2],
+                      matrix.row0[0]*matrix.row2[2] - matrix.row0[2]*matrix.row2[0],
+                      matrix.row0[1]*matrix.row2[0] - matrix.row0[0]*matrix.row2[1]}
+
+    row2 := []float64{matrix.row0[1]*matrix.row1[2] - matrix.row0[2]*matrix.row1[1],
+                      matrix.row0[2]*matrix.row1[0] - matrix.row0[0]*matrix.row1[2],
+                      matrix.row0[0]*matrix.row1[1] - matrix.row0[1]*matrix.row1[0]}
+    
+    product0 := normal.X * row0[0] + normal.Y * row0[1] + normal.Z * row0[2]
+    product1 := normal.X * row1[0] + normal.Y * row1[1] + normal.Z * row1[2]
+    product2 := normal.X * row2[0] + normal.Y * row2[1] + normal.Z * row2[2]
+    return raytracer.Vector{product0, product1, product2}
+}
+
+func applyT(matrix TMatrix, v raytracer.Vector, isPoint bool) raytracer.Vector {
+    if isPoint {
+        product0 := v.X * matrix.row0[0] + v.Y * matrix.row0[1] + v.Z * matrix.row0[2] + 1 * matrix.row0[3]
+        product1 := v.X * matrix.row1[0] + v.Y * matrix.row1[1] + v.Z * matrix.row1[2] + 1 * matrix.row1[3]
+        product2 := v.X * matrix.row2[0] + v.Y * matrix.row2[1] + v.Z * matrix.row2[2] + 1 * matrix.row2[3]
+        //product3 := v.X * matrix.row3[0] + v.Y * matrix.row3[1] + v.Z * matrix.row3[2] + 1 * matrix.row3[3]
+        return raytracer.Vector{product0, product1, product2}
+    } else {
+        product0 := v.X * matrix.row0[0] + v.Y * matrix.row0[1] + v.Z * matrix.row0[2]
+        product1 := v.X * matrix.row1[0] + v.Y * matrix.row1[1] + v.Z * matrix.row1[2]
+        product2 := v.X * matrix.row2[0] + v.Y * matrix.row2[1] + v.Z * matrix.row2[2]
+        //product3 := v.X * matrix.row3[0] + v.Y * matrix.row3[1] + v.Z * matrix.row3[2] + 0 * matrix.row3[3]
+        return raytracer.Vector{product0, product1, product2}
+    }
+}
+
 // Formula from http://www.csee.umbc.edu/~olano/435f02/ray-sphere.html
 func (sphere Sphere) hit(ray Ray, isShadowRay bool, reflectionDepth int) (float64, raytracer.Vector) {
-    //fmt.Println(reflectionDepth)
-    a := ray.direction.DotProduct(ray.direction) 
-    b := 2.0 * ray.direction.DotProduct(ray.start.VectorSub(sphere.center)) 
-    c := ray.start.VectorSub(sphere.center).DotProduct(ray.start.VectorSub(sphere.center)) - math.Pow(sphere.radius, 2)
+    tMatrix := shapeTransformations[sphere]
+    usedRay := ray
+    if tMatrix != emptyMatrix() {
+        //fmt.Println("Original origin:", ray.start)
+        //fmt.Println("Transform Matrix:", tMatrix)
+        usedRay.start = applyT(tMatrix, ray.start, true)
+        //fmt.Println("Changed origin:", ray.start)
+        usedRay.direction = applyT(tMatrix, ray.direction, false)
+    }
+    if isShadowRay {
+        //fmt.Println(usedRay)
+    }
+    a := usedRay.direction.DotProduct(usedRay.direction) 
+    b := 2.0 * usedRay.direction.DotProduct(usedRay.start.VectorSub(sphere.center)) 
+    c := usedRay.start.VectorSub(sphere.center).DotProduct(usedRay.start.VectorSub(sphere.center)) - math.Pow(sphere.radius, 2)
     discriminant := math.Pow(b, 2) - 4.0*a*c
 
     if discriminant < 0 {
@@ -366,26 +436,33 @@ func (sphere Sphere) hit(ray Ray, isShadowRay bool, reflectionDepth int) (float6
         }
     }
 
-    intersection := getRayIntersection(t, ray)
-    surfaceNormal := intersection.VectorSub(sphere.center).VectorDiv(sphere.radius)
-
-    color := calculateColor(sphere, spheres[sphere], intersection, surfaceNormal, ray, false)
-    if reflectionDepth == 0 {
-        color = calculateColor(sphere, spheres[sphere], intersection, surfaceNormal, ray, true)
+    intersection := getRayIntersection(t, usedRay)
+    originalIntersection := intersection
+    if tMatrix != emptyMatrix() {
+        intersection = applyT(tMatrix, intersection, true)
     }
-    //if reflectionDepth == 0 {
-    //    fmt.Println(color)
-    //}
-    //clip(&color)
+    surfaceNormal := intersection.VectorSub(sphere.center).VectorDiv(sphere.radius)
+    if tMatrix != emptyMatrix() {
+        //surfaceNormal = transformNormal(tMatrix, surfaceNormal)
+        //surfaceNormal = applyT(tMatrix, surfaceNormal, false)
+    }
+
+    if !isShadowRay {
+        //fmt.Println(usedRay.start)
+        //fmt.Println(intersection)
+    }
+    color := calculateColor(sphere, spheres[sphere], originalIntersection, surfaceNormal, usedRay, false)
+    if reflectionDepth == 0 {
+        color = calculateColor(sphere, spheres[sphere], intersection, surfaceNormal, usedRay, true)
+    }
     if reflectionDepth > 0 {
-        reflectedColor := calculateReflectedColor(sphere, ray, intersection, surfaceNormal, reflectionDepth-1)
+        reflectedColor := calculateReflectedColor(sphere, usedRay, intersection, surfaceNormal, reflectionDepth-1)
         empty := emptyVector()
         if reflectedColor != empty {
             color = color.VectorAdd(reflectedColor.VectorMult(spheres[sphere].reflective))
             //color = color.VectorScale(0.3).VectorAdd(reflectedColor.VectorScale(0.7))
             //color = reflectedColor
         }
-        //fmt.Println(color)
     }
 
     return t, color
@@ -467,10 +544,11 @@ func updateIndices(currentIndex int, nextIndex int, line string) (int, int) {
 func interpretScene(lines []string) {
     SCALE_FACTOR := 10.0
     var currentMaterial Material
+    var currentTransformation TMatrix
     var currentIndex int
     var nextIndex int
     for _, line := range lines {
-        currentIndex = 4
+        currentIndex = int(math.Min(4, float64(len(line))))
         nextIndex = currentIndex + strings.Index(line[currentIndex:], " ")
         // Comment lines in scene files
         if strings.Contains(line, "#") {
@@ -613,13 +691,25 @@ func interpretScene(lines []string) {
             reflective.X, reflective.Y, reflective.Z = reflectiveR, reflectiveG, reflectiveB
             currentMaterial.reflective = reflective
         } else if strings.Contains(line, "xft") {
+            tx, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
+            ty, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
+            tz, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            
+            row0 := [4]float64{1, 0, 0, -tx*SCALE_FACTOR}
+            row1 := [4]float64{0, 1, 0, -ty*SCALE_FACTOR}
+            row2 := [4]float64{0, 0, 1, -tz*SCALE_FACTOR}
+            row3 := [4]float64{0, 0, 0, 1}
 
+            matrix := TMatrix{row0:row0, row1:row1, row2:row2, row3:row3}
+            currentTransformation = matrix
         } else if strings.Contains(line, "xfr") {
 
         } else if strings.Contains(line, "xfs") {
 
         } else if strings.Contains(line, "xfz") {
-
+            currentTransformation = emptyMatrix()
         } else if strings.Contains(line, "sph") {
             centerX, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
             currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
@@ -629,9 +719,10 @@ func interpretScene(lines []string) {
             currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
             radius, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
 
-            sphere := Sphere{center: raytracer.Vector{X:centerX, Y:centerY, Z:centerZ}.VectorScale(SCALE_FACTOR), radius: radius*SCALE_FACTOR}
+            sphere := Sphere{id: rand.Float64(), center: raytracer.Vector{X:centerX, Y:centerY, Z:centerZ}.VectorScale(SCALE_FACTOR), radius: radius*SCALE_FACTOR}
             spheres[sphere] = currentMaterial
             shapes[Shape(sphere)] = currentMaterial
+            shapeTransformations[Shape(sphere)] = currentTransformation
         } else if strings.Contains(line, "tri") {
             aX, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
             currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
