@@ -24,13 +24,21 @@ type Material struct {
     reflective raytracer.Vector
 }
 
+// T for Transform
+type TMatrix struct {
+    row0 []float64
+    row1 []float64
+    row2 []float64
+    row3 []float64
+}
+
 type Ray struct {
     start raytracer.Vector
     direction raytracer.Vector
 }
 
 type Shape interface {
-    hit(Ray, bool) (float64, raytracer.Vector)
+    hit(Ray, bool, int) (float64, raytracer.Vector)
 }
 
 type Triangle struct {
@@ -160,7 +168,7 @@ func calculateAmbientColor(ambient raytracer.Vector) raytracer.Vector {
 }
 
 // R = 2N(I . N) - I
-func getreflectedLight(light raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
+func getReflectedLight(light raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
     lightDotNormal := math.Max(0.0, light.DotProduct(normal))
     return normal.VectorScale(2.0*lightDotNormal).VectorSub(light)
 }
@@ -176,7 +184,7 @@ func calculateSpecularColor(specular raytracer.Vector, shininess float64, inters
 
     for light, lightColor := range directionalLights {
         incomingLight = light.VectorScale(-1)
-        reflectedLight = getreflectedLight(incomingLight, normal).Normalize()
+        reflectedLight = getReflectedLight(incomingLight, normal).Normalize()
         directionToViewer = eye.VectorSub(intersection)
         specularTerm = math.Max(0, reflectedLight.DotProduct(directionToViewer.Normalize()))
         color = specular.VectorMult(lightColor.VectorScale(math.Pow(specularTerm, shininess)))
@@ -184,20 +192,13 @@ func calculateSpecularColor(specular raytracer.Vector, shininess float64, inters
     }
     for light, lightColor := range pointLights {
         incomingLight = light
-        reflectedLight = getreflectedLight(incomingLight, normal).Normalize()
+        reflectedLight = getReflectedLight(incomingLight, normal).Normalize()
         directionToViewer = eye.VectorSub(intersection)
         specularTerm = math.Max(0, reflectedLight.DotProduct(directionToViewer.Normalize()))
         color = specular.VectorMult(lightColor.VectorScale(math.Pow(specularTerm, shininess)))
         specularColor = specularColor.VectorAdd(color)
     }
     return specularColor
-}
-
-func errorMargin(pointA raytracer.Vector, pointB raytracer.Vector) raytracer.Vector {
-    //stepSize := pointA.DistanceTo(pointB)/40
-    //fmt.Println(stepSize)
-    stepSize := 0.0
-    return raytracer.Vector{X:stepSize, Y:stepSize, Z:stepSize}
 }
 
 func calculateColor(shape Shape, material Material, intersection raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
@@ -208,34 +209,76 @@ func calculateColor(shape Shape, material Material, intersection raytracer.Vecto
 
     shadedColor := ambientColor.VectorAdd(diffuseColor.VectorAdd(specularColor))
 
-    //isSphere := reflect.TypeOf(shape).String() == "main.Sphere"
-    //isTriangle := reflect.TypeOf(shape).String() == "main.Triangle"
-
+    isShadowed := false
     for light, _ := range directionalLights {
         shadowRay := computeRay(intersection, intersection.VectorAdd(light.VectorScale(-1)))
         for otherShape, _ := range shapes {
             if (!reflect.DeepEqual(otherShape, shape)) {
-                hitValue, _ := otherShape.hit(shadowRay, true)
+                hitValue, _ := otherShape.hit(shadowRay, true, 1)
                 if hitValue == IS_SHADOWED {
-                    return ambientColor
+                    isShadowed = true
+                    shadedColor = ambientColor
+                    break
                 }
             }
         }
+        // No more need to go on once you find out it's already shadowed
+        if isShadowed {
+            break
+        }
     }
-    for light, _ := range pointLights {
-        // Start a little bit after actual pixel to avoid errors with hitting itself
-        shadowRay := computeRay(intersection, light)
-        for otherShape, _ := range shapes {
-            if (!reflect.DeepEqual(otherShape, shape)) {
-                hitValue, _ := otherShape.hit(shadowRay, true)
-                if hitValue == IS_SHADOWED {
-                    return ambientColor
+    if !isShadowed {
+        for light, _ := range pointLights {
+            shadowRay := computeRay(intersection, light)
+            for otherShape, _ := range shapes {
+                if (!reflect.DeepEqual(otherShape, shape)) {
+                    hitValue, _ := otherShape.hit(shadowRay, true, 1)
+                    if hitValue == IS_SHADOWED {
+                        isShadowed = true
+                        shadedColor = ambientColor
+                        break
+                    }
                 }
+            }
+            if isShadowed {
+                break
             }
         }
     }
 
     return shadedColor
+}
+
+func errorMargin(pointA raytracer.Vector, pointB raytracer.Vector) raytracer.Vector {
+    //stepSize := pointA.DistanceTo(pointB)/40
+    //fmt.Println(stepSize)
+    stepSize := 0.0
+    return raytracer.Vector{X:stepSize, Y:stepSize, Z:stepSize}
+}
+
+func reflectionLight(incoming raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
+    return incoming.VectorAdd(normal.VectorScale(2*(incoming.DotProduct(normal))))
+}
+
+func calculateReflectedColor(shape Shape, incomingDirection raytracer.Vector, intersection raytracer.Vector, normal raytracer.Vector, depth int) raytracer.Vector {
+    reflectedColor := emptyVector()
+    minT := -math.MaxFloat64
+    //reflectedLight := getReflectedLight(incomingDirection, normal)
+    reflectedLight := reflectionLight(incomingDirection, normal)
+    //reflectedRay := computeRay(intersection, intersection.VectorSub(reflectedLight))
+    reflectedRay := computeRay(intersection, reflectedLight)
+    for otherShape, _ := range shapes {
+        if (!reflect.DeepEqual(otherShape, shape)) {
+            hitValue, color := otherShape.hit(reflectedRay, false, depth)
+            if (hitValue != -1 && hitValue > minT) {
+                //fmt.Println(hitValue)
+                reflectedColor = color
+                minT = hitValue
+                clip(&color)
+            }
+        }
+    }
+    return reflectedColor
 }
 
 func isInsideTriangle(triangle Triangle, intersection raytracer.Vector, normal raytracer.Vector) bool {
@@ -259,13 +302,14 @@ func isInsideTriangle(triangle Triangle, intersection raytracer.Vector, normal r
 }
 
 // http://www.scratchapixel.com/lessons/3d-basic-lessons/lesson-9-ray-triangle-intersection/ray-triangle-intersection-geometric-solution/
-func (triangle Triangle) hit (ray Ray, isShadowRay bool) (float64, raytracer.Vector) {
+func (triangle Triangle) hit (ray Ray, isShadowRay bool, reflectionDepth int) (float64, raytracer.Vector) {
     // n = (V1 - V0) x (V2 - V0)
     surfaceNormal := triangle.b.VectorSub(triangle.a).CrossProduct(triangle.c.VectorSub(triangle.a)).Normalize()
     d := surfaceNormal.DotProduct(triangle.a.Normalize())
     t := -(surfaceNormal.DotProduct(ray.start) + d)/(surfaceNormal.DotProduct(ray.direction))
     intersection := getRayIntersection(t, ray)
 
+    // Still need to handle case of triangle parallel to eye
     if !isInsideTriangle(triangle, intersection, surfaceNormal) {
         return -1, emptyVector()
     }
@@ -278,12 +322,16 @@ func (triangle Triangle) hit (ray Ray, isShadowRay bool) (float64, raytracer.Vec
     }
 
     color := calculateColor(triangle, triangles[triangle], intersection, surfaceNormal)
+    //if reflectionDepth >= 0 {
+    //    reflectedColor := calculateReflectedColor(intersection, surfaceNormal, reflectionDepth-1)
+    //    color = color.VectorAdd(reflectedColor)
+    //}
 
     return t, color
 }
 
 // Formula from http://www.csee.umbc.edu/~olano/435f02/ray-sphere.html
-func (sphere Sphere) hit(ray Ray, isShadowRay bool) (float64, raytracer.Vector) {
+func (sphere Sphere) hit(ray Ray, isShadowRay bool, reflectionDepth int) (float64, raytracer.Vector) {
     a := ray.direction.DotProduct(ray.direction) 
     b := 2.0 * ray.direction.DotProduct(ray.start.VectorSub(sphere.center)) 
     c := ray.start.VectorSub(sphere.center).DotProduct(ray.start.VectorSub(sphere.center)) - math.Pow(sphere.radius, 2)
@@ -292,7 +340,6 @@ func (sphere Sphere) hit(ray Ray, isShadowRay bool) (float64, raytracer.Vector) 
     if discriminant < 0 {
         return -1, emptyVector()
     }
-
 
     tNeg := (-b - math.Sqrt(discriminant))/(2*a)
     tPos := (-b + math.Sqrt(discriminant))/(2*a)
@@ -310,6 +357,10 @@ func (sphere Sphere) hit(ray Ray, isShadowRay bool) (float64, raytracer.Vector) 
     surfaceNormal := intersection.VectorSub(sphere.center).VectorDiv(sphere.radius)
 
     color := calculateColor(sphere, spheres[sphere], intersection, surfaceNormal)
+    if reflectionDepth > 0 {
+        reflectedColor := calculateReflectedColor(sphere, ray.direction, intersection, surfaceNormal, reflectionDepth-1)
+        color = color.VectorAdd(reflectedColor.VectorScale(0.1))
+    }
 
     return t, color
 }
@@ -350,7 +401,7 @@ func renderScene() {
         // Refactor these into one for loop with Shape interface
         for sphere, _ := range spheres {
             currentShape := Shape(sphere)
-            rayHit, rayColor := currentShape.hit(ray, false)
+            rayHit, rayColor := currentShape.hit(ray, false, 5)
             if (rayHit != -1 && rayHit < minT) {
                 color = rayColor
                 isHit = true
@@ -360,7 +411,7 @@ func renderScene() {
         }
         for triangle, _ := range triangles {
             currentShape := Shape(triangle)
-            rayHit, rayColor := currentShape.hit(ray, false)
+            rayHit, rayColor := currentShape.hit(ray, false, 1)
             if (rayHit != -1 && rayHit < minT) {
                 color = rayColor
                 isHit = true
@@ -534,6 +585,14 @@ func interpretScene(lines []string) {
             reflectiveB, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
             reflective.X, reflective.Y, reflective.Z = reflectiveR, reflectiveG, reflectiveB
             currentMaterial.reflective = reflective
+        } else if strings.Contains(line, "xft") {
+
+        } else if strings.Contains(line, "xfr") {
+
+        } else if strings.Contains(line, "xfs") {
+
+        } else if strings.Contains(line, "xfz") {
+
         } else if strings.Contains(line, "sph") {
             centerX, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
             currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
@@ -554,7 +613,7 @@ func interpretScene(lines []string) {
             aZ, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
             currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
             a := raytracer.Vector{X:aX, Y:aY, Z:aZ}.VectorScale(SCALE_FACTOR)
-            
+
             bX, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
             currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
             bY, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
