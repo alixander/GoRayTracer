@@ -74,6 +74,14 @@ func (a Vector) Normalize() Vector {
     }
 }
 
+// a x b = <a2*b3-a3*b2, a3*b1-a1*b3, a1*b2-a2*b1>
+func (a Vector) CrossProduct(b Vector) Vector {
+    x := a.Y*b.Z - a.Z*b.Y
+    y := a.Z*b.X - a.X*b.Z
+    z := a.X*b.Y - a.Y*b.X
+    return Vector{X:x, Y:y, Z:z}
+}
+
 func (a Vector) DotProduct(b Vector) float64 {
     return a.X*b.X + a.Y*b.Y + a.Z*b.Z
 }

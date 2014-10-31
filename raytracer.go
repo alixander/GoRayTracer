@@ -28,6 +28,16 @@ type Ray struct {
     direction raytracer.Vector
 }
 
+type Shape interface {
+    hit(Ray, bool) (float64, raytracer.Vector)
+}
+
+type Triangle struct {
+    a raytracer.Vector
+    b raytracer.Vector
+    c raytracer.Vector
+}
+
 type Sphere struct {
     center raytracer.Vector
     radius float64
@@ -39,6 +49,7 @@ var (
     LR = emptyVector()
     UL = emptyVector()
     UR = emptyVector()
+
     width int = 0
     height int = 0
     viewport = image.Rect(0, 0, width, height)
@@ -46,27 +57,14 @@ var (
 
     eye = emptyVector()
 
-    //sphereA = Sphere{center: raytracer.Vector{X: 0, Y:0, Z:-200}, radius: 320}
-    //sphereA = Sphere{center: raytracer.Vector{X: 0, Y:0, Z:-400}, radius: 120}
-    //sphereB = Sphere{center: raytracer.Vector{X: 250, Y:0, Z:-300}, radius: 120}
-    //sphereC = Sphere{center: raytracer.Vector{X: -250, Y:0, Z:-700}, radius: 120}
-    //sphereD = Sphere{center: raytracer.Vector{X: 0, Y:-250, Z:-200}, radius: 120}
-    //sphereE = Sphere{center: raytracer.Vector{X: 0, Y:250, Z:-200}, radius: 120}
-
     pointLights = map[raytracer.Vector]raytracer.Vector{}
     directionalLights = map[raytracer.Vector]raytracer.Vector{}
-    spheres = map[Sphere]Material{}
-    transformations = [][]int{}
     ambientLight = emptyVector()
 
-    //tempColor = raytracer.Vector{X: 0.6, Y: 0.6, Z: 0.6}
-    //lightA = (raytracer.Vector{X: 300, Y: -400, Z: 350}).Normalize()
-    //lightB = (raytracer.Vector{X: -100, Y: 400, Z: 100}).Normalize()
+    spheres = map[Sphere]Material{}
+    triangles = map[Triangle]Material{}
 
-
-    //allSpheres = []Sphere {sphereA, sphereB, sphereC, sphereD, sphereE}
-    //allSpheres = []Sphere {sphereA}
-    //pointLights = []raytracer.Vector {lightA, lightB}
+    transformations = [][]int{}
 )
 
 func drawPixel(canvas *image.RGBA, x float64, y float64, r float64, g float64, b float64) {
@@ -237,6 +235,41 @@ func (sphere Sphere) calculateColor(material Material, intersection raytracer.Ve
     return shadedColor
 }
 
+func isInsideTriangle(triangle Triangle, intersection raytracer.Vector, normal raytracer.Vector) bool {
+    edge0 := triangle.b.VectorSub(triangle.a)
+    c0 := intersection.VectorSub(triangle.a)
+    if (normal.DotProduct(edge0.CrossProduct(c0))) < 0 {
+        return false
+    }
+    edge1 := triangle.c.VectorSub(triangle.b)
+    c1 := intersection.VectorSub(triangle.b)
+    if (normal.DotProduct(edge1.CrossProduct(c1))) < 0 {
+        return false
+    }
+
+    edge2 := triangle.a.VectorSub(triangle.c)
+    c2 := intersection.VectorSub(triangle.c)
+    if (normal.DotProduct(edge2.CrossProduct(c2))) < 0 {
+        return false
+    }
+    return true
+}
+
+// http://www.scratchapixel.com/lessons/3d-basic-lessons/lesson-9-ray-triangle-intersection/ray-triangle-intersection-geometric-solution/
+func (triangle Triangle) hit (ray Ray, isShadow bool) (float64, raytracer.Vector) {
+    // n = (V1 - V0) x (V2 - V0)
+    surfaceNormal := triangle.b.VectorSub(triangle.a).CrossProduct(triangle.c.VectorSub(triangle.a)).Normalize()
+    d := surfaceNormal.DotProduct(triangle.a.Normalize())
+    t := -(surfaceNormal.DotProduct(ray.start) + d)/(surfaceNormal.DotProduct(ray.direction))
+    intersection := getRayIntersection(t, ray)
+
+    if !isInsideTriangle(triangle, intersection, surfaceNormal) {
+        return -1, emptyVector()
+    }
+
+    return t, raytracer.Vector{0.4, 0.4, 0}
+}
+
 // Formula from http://www.csee.umbc.edu/~olano/435f02/ray-sphere.html
 func (sphere Sphere) hit(ray Ray, isShadowRay bool) (float64, raytracer.Vector) {
     a := ray.direction.DotProduct(ray.direction) 
@@ -298,8 +331,18 @@ func renderScene() {
         var color raytracer.Vector
         isHit := false
         minT := math.MaxFloat64
+        // Refactor these into one for loop with Shape interface
         for sphere, _ := range spheres {
             rayHit, rayColor := sphere.hit(ray, false)
+            if (rayHit != -1 && rayHit < minT) {
+                color = rayColor
+                isHit = true
+                minT = rayHit
+                clip(&color)
+            }
+        }
+        for triangle, _ := range triangles {
+            rayHit, rayColor := triangle.hit(ray, false)
             if (rayHit != -1 && rayHit < minT) {
                 color = rayColor
                 isHit = true
@@ -484,6 +527,32 @@ func interpretScene(lines []string) {
 
             sphere := Sphere{center: raytracer.Vector{X:centerX, Y:centerY, Z:centerZ}.VectorScale(SCALE_FACTOR), radius: radius*SCALE_FACTOR}
             spheres[sphere] = currentMaterial
+        } else if strings.Contains(line, "tri") {
+            aX, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
+            aY, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
+            aZ, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
+            a := raytracer.Vector{X:aX, Y:aY, Z:aZ}.VectorScale(SCALE_FACTOR)
+            
+            bX, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
+            bY, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
+            bZ, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
+            b := raytracer.Vector{X:bX, Y:bY, Z:bZ}.VectorScale(SCALE_FACTOR)
+
+            cX, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
+            cY, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
+            cZ, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            c := raytracer.Vector{X:cX, Y:cY, Z:cZ}.VectorScale(SCALE_FACTOR)
+
+            triangle := Triangle{a:a, b:b, c:c}
+            triangles[triangle] = currentMaterial
         }
     }
 }
