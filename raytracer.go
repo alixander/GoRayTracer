@@ -173,7 +173,7 @@ func getReflectedLight(light raytracer.Vector, normal raytracer.Vector) raytrace
     return normal.VectorScale(2.0*lightDotNormal).VectorSub(light)
 }
 
-func calculateSpecularColor(specular raytracer.Vector, shininess float64, intersection raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
+func calculateSpecularColor(specular raytracer.Vector, shininess float64, intersection raytracer.Vector, normal raytracer.Vector, ray Ray, isReflection bool) raytracer.Vector {
     specularColor := emptyVector()
 
     var reflectedLight raytracer.Vector
@@ -185,7 +185,7 @@ func calculateSpecularColor(specular raytracer.Vector, shininess float64, inters
     for light, lightColor := range directionalLights {
         incomingLight = light.VectorScale(-1)
         reflectedLight = getReflectedLight(incomingLight, normal).Normalize()
-        directionToViewer = eye.VectorSub(intersection)
+        directionToViewer = ray.start.VectorSub(intersection)
         specularTerm = math.Max(0, reflectedLight.DotProduct(directionToViewer.Normalize()))
         color = specular.VectorMult(lightColor.VectorScale(math.Pow(specularTerm, shininess)))
         specularColor = specularColor.VectorAdd(color)
@@ -193,19 +193,23 @@ func calculateSpecularColor(specular raytracer.Vector, shininess float64, inters
     for light, lightColor := range pointLights {
         incomingLight = light
         reflectedLight = getReflectedLight(incomingLight, normal).Normalize()
-        directionToViewer = eye.VectorSub(intersection)
-        specularTerm = math.Max(0, reflectedLight.DotProduct(directionToViewer.Normalize()))
+        directionToViewer = ray.start.VectorSub(intersection)
+        if isReflection {
+            specularTerm = math.Min(0, reflectedLight.DotProduct(directionToViewer.Normalize()))
+        } else {
+            specularTerm = math.Max(0, reflectedLight.DotProduct(directionToViewer.Normalize()))
+        }
         color = specular.VectorMult(lightColor.VectorScale(math.Pow(specularTerm, shininess)))
         specularColor = specularColor.VectorAdd(color)
     }
     return specularColor
 }
 
-func calculateColor(shape Shape, material Material, intersection raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
+func calculateColor(shape Shape, material Material, intersection raytracer.Vector, normal raytracer.Vector, ray Ray, isReflection bool) raytracer.Vector {
     //ambientColor := calculateAmbientColor(material.ambient.VectorAdd(ambientLight))
     ambientColor := calculateAmbientColor(material.ambient)
     diffuseColor := calculateDiffuseColor(material.diffuse, normal)
-    specularColor := calculateSpecularColor(material.specular, material.shininess, intersection, normal)
+    specularColor := calculateSpecularColor(material.specular, material.shininess, intersection, normal, ray, isReflection)
 
     shadedColor := ambientColor.VectorAdd(diffuseColor.VectorAdd(specularColor))
 
@@ -216,6 +220,7 @@ func calculateColor(shape Shape, material Material, intersection raytracer.Vecto
             if (!reflect.DeepEqual(otherShape, shape)) {
                 hitValue, _ := otherShape.hit(shadowRay, true, 1)
                 if hitValue == IS_SHADOWED {
+                    return ambientColor
                     isShadowed = true
                     shadedColor = ambientColor
                     break
@@ -234,6 +239,7 @@ func calculateColor(shape Shape, material Material, intersection raytracer.Vecto
                 if (!reflect.DeepEqual(otherShape, shape)) {
                     hitValue, _ := otherShape.hit(shadowRay, true, 1)
                     if hitValue == IS_SHADOWED {
+                        return ambientColor
                         isShadowed = true
                         shadedColor = ambientColor
                         break
@@ -257,24 +263,30 @@ func errorMargin(pointA raytracer.Vector, pointB raytracer.Vector) raytracer.Vec
 }
 
 func reflectionLight(incoming raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
-    return incoming.VectorAdd(normal.VectorScale(2*(incoming.DotProduct(normal))))
+    d := math.Min(0, incoming.DotProduct(normal))
+    return incoming.VectorAdd(normal.VectorScale(2*d))
 }
 
-func calculateReflectedColor(shape Shape, incomingDirection raytracer.Vector, intersection raytracer.Vector, normal raytracer.Vector, depth int) raytracer.Vector {
+func calculateReflectedColor(shape Shape, incomingRay Ray, intersection raytracer.Vector, normal raytracer.Vector, depth int) raytracer.Vector {
     reflectedColor := emptyVector()
     minT := -math.MaxFloat64
-    //reflectedLight := getReflectedLight(incomingDirection, normal)
-    reflectedLight := reflectionLight(incomingDirection, normal)
+    //incomingLight := intersection.VectorSub(incomingRay.start)
+    //fmt.Println(incomingLight)
+    //reflectedLight := getReflectedLight(incomingRay.direction.VectorScale(-1), normal)
+    reflectedLight := reflectionLight(incomingRay.direction, normal)
+    //reflectedLight := reflectionLight(incomingLight, normal).Normalize()
+    outgoingLight := reflectedLight.VectorSub(intersection)
     //reflectedRay := computeRay(intersection, intersection.VectorSub(reflectedLight))
-    reflectedRay := computeRay(intersection, reflectedLight)
+    //reflectedRay := computeRay(intersection, reflectedLight.VectorScale(-1))
+    reflectedRay := computeRay(intersection, outgoingLight)
     for otherShape, _ := range shapes {
         if (!reflect.DeepEqual(otherShape, shape)) {
             hitValue, color := otherShape.hit(reflectedRay, false, depth)
-            if (hitValue != -1 && hitValue > minT) {
+            if (hitValue < 0 && hitValue != -1 && hitValue > minT) {
                 //fmt.Println(hitValue)
                 reflectedColor = color
                 minT = hitValue
-                clip(&color)
+                //clip(&color)
             }
         }
     }
@@ -321,7 +333,7 @@ func (triangle Triangle) hit (ray Ray, isShadowRay bool, reflectionDepth int) (f
         }
     }
 
-    color := calculateColor(triangle, triangles[triangle], intersection, surfaceNormal)
+    color := calculateColor(triangle, triangles[triangle], intersection, surfaceNormal, ray, true)
     //if reflectionDepth >= 0 {
     //    reflectedColor := calculateReflectedColor(intersection, surfaceNormal, reflectionDepth-1)
     //    color = color.VectorAdd(reflectedColor)
@@ -332,6 +344,7 @@ func (triangle Triangle) hit (ray Ray, isShadowRay bool, reflectionDepth int) (f
 
 // Formula from http://www.csee.umbc.edu/~olano/435f02/ray-sphere.html
 func (sphere Sphere) hit(ray Ray, isShadowRay bool, reflectionDepth int) (float64, raytracer.Vector) {
+    //fmt.Println(reflectionDepth)
     a := ray.direction.DotProduct(ray.direction) 
     b := 2.0 * ray.direction.DotProduct(ray.start.VectorSub(sphere.center)) 
     c := ray.start.VectorSub(sphere.center).DotProduct(ray.start.VectorSub(sphere.center)) - math.Pow(sphere.radius, 2)
@@ -356,10 +369,23 @@ func (sphere Sphere) hit(ray Ray, isShadowRay bool, reflectionDepth int) (float6
     intersection := getRayIntersection(t, ray)
     surfaceNormal := intersection.VectorSub(sphere.center).VectorDiv(sphere.radius)
 
-    color := calculateColor(sphere, spheres[sphere], intersection, surfaceNormal)
+    color := calculateColor(sphere, spheres[sphere], intersection, surfaceNormal, ray, false)
+    if reflectionDepth == 0 {
+        color = calculateColor(sphere, spheres[sphere], intersection, surfaceNormal, ray, true)
+    }
+    //if reflectionDepth == 0 {
+    //    fmt.Println(color)
+    //}
+    //clip(&color)
     if reflectionDepth > 0 {
-        reflectedColor := calculateReflectedColor(sphere, ray.direction, intersection, surfaceNormal, reflectionDepth-1)
-        color = color.VectorAdd(reflectedColor.VectorScale(0.1))
+        reflectedColor := calculateReflectedColor(sphere, ray, intersection, surfaceNormal, reflectionDepth-1)
+        empty := emptyVector()
+        if reflectedColor != empty {
+            color = color.VectorAdd(reflectedColor.VectorMult(spheres[sphere].reflective))
+            //color = color.VectorScale(0.3).VectorAdd(reflectedColor.VectorScale(0.7))
+            //color = reflectedColor
+        }
+        //fmt.Println(color)
     }
 
     return t, color
@@ -401,7 +427,7 @@ func renderScene() {
         // Refactor these into one for loop with Shape interface
         for sphere, _ := range spheres {
             currentShape := Shape(sphere)
-            rayHit, rayColor := currentShape.hit(ray, false, 5)
+            rayHit, rayColor := currentShape.hit(ray, false, 1)
             if (rayHit != -1 && rayHit < minT) {
                 color = rayColor
                 isHit = true
@@ -575,6 +601,7 @@ func interpretScene(lines []string) {
             currentMaterial.specular = specular
 
             shininess, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
+            currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
             currentMaterial.shininess = shininess
 
             reflective := emptyVector()
