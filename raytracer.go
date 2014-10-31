@@ -5,6 +5,7 @@ import (
     "bufio"
     "fmt"
     "math"
+    "reflect"
     "strings"
     "strconv"
     "./vector"
@@ -45,6 +46,8 @@ type Sphere struct {
 
 //globals
 var (
+    IS_SHADOWED = 1.0
+
     LL = emptyVector()
     LR = emptyVector()
     UL = emptyVector()
@@ -63,6 +66,7 @@ var (
 
     spheres = map[Sphere]Material{}
     triangles = map[Triangle]Material{}
+    shapes = map[Shape]Material{}
 
     transformations = [][]int{}
 )
@@ -192,11 +196,11 @@ func calculateSpecularColor(specular raytracer.Vector, shininess float64, inters
 func errorMargin(pointA raytracer.Vector, pointB raytracer.Vector) raytracer.Vector {
     //stepSize := pointA.DistanceTo(pointB)/40
     //fmt.Println(stepSize)
-    stepSize := 50.0
+    stepSize := 0.0
     return raytracer.Vector{X:stepSize, Y:stepSize, Z:stepSize}
 }
 
-func (sphere Sphere) calculateColor(material Material, intersection raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
+func calculateColor(shape Shape, material Material, intersection raytracer.Vector, normal raytracer.Vector) raytracer.Vector {
     //ambientColor := calculateAmbientColor(material.ambient.VectorAdd(ambientLight))
     ambientColor := calculateAmbientColor(material.ambient)
     diffuseColor := calculateDiffuseColor(material.diffuse, normal)
@@ -204,32 +208,31 @@ func (sphere Sphere) calculateColor(material Material, intersection raytracer.Ve
 
     shadedColor := ambientColor.VectorAdd(diffuseColor.VectorAdd(specularColor))
 
-    isShadow := false
+    //isSphere := reflect.TypeOf(shape).String() == "main.Sphere"
+    //isTriangle := reflect.TypeOf(shape).String() == "main.Triangle"
+
     for light, _ := range directionalLights {
-        shadowRay := computeRay(intersection.VectorAdd(errorMargin(intersection, light)), light.VectorScale(-1))
-        for otherSphere, _ := range spheres {
-            if (otherSphere != sphere) {
-                hitValue, _ := otherSphere.hit(shadowRay, true)
-                if hitValue != -1 {
-                    isShadow = true
+        shadowRay := computeRay(intersection, intersection.VectorAdd(light.VectorScale(-1)))
+        for otherShape, _ := range shapes {
+            if (!reflect.DeepEqual(otherShape, shape)) {
+                hitValue, _ := otherShape.hit(shadowRay, true)
+                if hitValue == IS_SHADOWED {
+                    return ambientColor
                 }
             }
         }
     }
     for light, _ := range pointLights {
         // Start a little bit after actual pixel to avoid errors with hitting itself
-        shadowRay := computeRay(intersection.VectorAdd(errorMargin(intersection, light)), light)
-        for otherSphere, _ := range spheres {
-            if (otherSphere != sphere) {
-                hitValue, _ := otherSphere.hit(shadowRay, true)
-                if hitValue != -1 {
-                    isShadow = true
+        shadowRay := computeRay(intersection, light)
+        for otherShape, _ := range shapes {
+            if (!reflect.DeepEqual(otherShape, shape)) {
+                hitValue, _ := otherShape.hit(shadowRay, true)
+                if hitValue == IS_SHADOWED {
+                    return ambientColor
                 }
             }
         }
-    }
-    if isShadow {
-        return ambientColor
     }
 
     return shadedColor
@@ -256,7 +259,7 @@ func isInsideTriangle(triangle Triangle, intersection raytracer.Vector, normal r
 }
 
 // http://www.scratchapixel.com/lessons/3d-basic-lessons/lesson-9-ray-triangle-intersection/ray-triangle-intersection-geometric-solution/
-func (triangle Triangle) hit (ray Ray, isShadow bool) (float64, raytracer.Vector) {
+func (triangle Triangle) hit (ray Ray, isShadowRay bool) (float64, raytracer.Vector) {
     // n = (V1 - V0) x (V2 - V0)
     surfaceNormal := triangle.b.VectorSub(triangle.a).CrossProduct(triangle.c.VectorSub(triangle.a)).Normalize()
     d := surfaceNormal.DotProduct(triangle.a.Normalize())
@@ -266,8 +269,17 @@ func (triangle Triangle) hit (ray Ray, isShadow bool) (float64, raytracer.Vector
     if !isInsideTriangle(triangle, intersection, surfaceNormal) {
         return -1, emptyVector()
     }
+    if isShadowRay {
+        if t > 0 {
+            return IS_SHADOWED, emptyVector()
+        } else {
+            return -1, emptyVector()
+        }
+    }
 
-    return t, raytracer.Vector{0.4, 0.4, 0}
+    color := calculateColor(triangle, triangles[triangle], intersection, surfaceNormal)
+
+    return t, color
 }
 
 // Formula from http://www.csee.umbc.edu/~olano/435f02/ray-sphere.html
@@ -281,19 +293,23 @@ func (sphere Sphere) hit(ray Ray, isShadowRay bool) (float64, raytracer.Vector) 
         return -1, emptyVector()
     }
 
-    if isShadowRay {
-        return 1, emptyVector()
-    }
 
     tNeg := (-b - math.Sqrt(discriminant))/(2*a)
     tPos := (-b + math.Sqrt(discriminant))/(2*a)
     var t float64
     t = math.Min(tNeg, tPos)
+    if isShadowRay {
+        if t > 0 {
+            return IS_SHADOWED, emptyVector()
+        } else {
+            return -1, emptyVector()
+        }
+    }
 
     intersection := getRayIntersection(t, ray)
     surfaceNormal := intersection.VectorSub(sphere.center).VectorDiv(sphere.radius)
 
-    color := sphere.calculateColor(spheres[sphere], intersection, surfaceNormal)
+    color := calculateColor(sphere, spheres[sphere], intersection, surfaceNormal)
 
     return t, color
 }
@@ -333,7 +349,8 @@ func renderScene() {
         minT := math.MaxFloat64
         // Refactor these into one for loop with Shape interface
         for sphere, _ := range spheres {
-            rayHit, rayColor := sphere.hit(ray, false)
+            currentShape := Shape(sphere)
+            rayHit, rayColor := currentShape.hit(ray, false)
             if (rayHit != -1 && rayHit < minT) {
                 color = rayColor
                 isHit = true
@@ -342,7 +359,8 @@ func renderScene() {
             }
         }
         for triangle, _ := range triangles {
-            rayHit, rayColor := triangle.hit(ray, false)
+            currentShape := Shape(triangle)
+            rayHit, rayColor := currentShape.hit(ray, false)
             if (rayHit != -1 && rayHit < minT) {
                 color = rayColor
                 isHit = true
@@ -527,6 +545,7 @@ func interpretScene(lines []string) {
 
             sphere := Sphere{center: raytracer.Vector{X:centerX, Y:centerY, Z:centerZ}.VectorScale(SCALE_FACTOR), radius: radius*SCALE_FACTOR}
             spheres[sphere] = currentMaterial
+            shapes[Shape(sphere)] = currentMaterial
         } else if strings.Contains(line, "tri") {
             aX, _ := strconv.ParseFloat(line[currentIndex:nextIndex], 64)
             currentIndex, nextIndex = updateIndices(currentIndex, nextIndex, line)
@@ -553,6 +572,7 @@ func interpretScene(lines []string) {
 
             triangle := Triangle{a:a, b:b, c:c}
             triangles[triangle] = currentMaterial
+            shapes[Shape(triangle)] = currentMaterial
         }
     }
 }
