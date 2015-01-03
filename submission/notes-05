@@ -1,0 +1,12 @@
+Command:
+./raytracer input-05
+
+How long it took:
+3.744 seconds
+
+Features:
+3 point lights and 1 directional lights
+2 Triangles and 1 Sphere
+Shadows
+Reflections
+Phong shading

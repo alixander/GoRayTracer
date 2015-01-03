@@ -66,6 +66,9 @@ func (a Vector) VectorIncrement(b float64) Vector {
 }
 
 func (a Vector) Normalize() Vector {
+    if a.X == 0 && a.Y == 0 && a.Z == 0 {
+        return Vector{0, 0, 0}
+    }
     magnitude := math.Sqrt(float64(a.X*a.X + a.Y*a.Y + a.Z*a.Z))
     return Vector{
         X: float64(a.X)/magnitude,

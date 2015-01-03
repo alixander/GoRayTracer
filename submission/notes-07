@@ -1,0 +1,10 @@
+Command:
+./raytracer input-07
+
+How long it took:
+24.102 seconds
+
+Features:
+Rendering an obj file
+Triangle Shading
+Shadow

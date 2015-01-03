@@ -1,0 +1,11 @@
+Command:
+./raytracer input-03
+
+How long it took:
+3.343 seconds
+
+Features:
+3 Point lights
+Phong shading
+Shadow
+Reflection

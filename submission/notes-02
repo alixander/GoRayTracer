@@ -1,0 +1,9 @@
+Command:
+./raytracer input-02
+
+How long it took:
+2.278 seconds
+
+Features:
+Shading from 1 point light
+Reflection
